@@ -1,21 +1,23 @@
 import streamlit as st
 import random
-import json
 from datetime import datetime
 
 st.set_page_config(page_title="True American – Desi Edition", page_icon="🇮🇳", layout="wide")
 
-# ── Persistent state via st.session_state (shared via rerun) ──────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# STATE
+# ─────────────────────────────────────────────────────────────────────────────
 def init_state():
     defaults = {
-        "players": {},       # email -> {name, team, joined_at}
-        "teams": {},         # team_id -> {name, cups, color}
-        "card_log": [],      # list of drawn card events
+        "players": {},
+        "teams": {},
+        "card_log": [],
         "current_card": None,
-        "game_started": False,
         "logged_in_email": None,
         "logged_in_name": None,
         "logged_in_team": None,
+        "card_revealed": False,
+        "card_result": None,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -23,189 +25,243 @@ def init_state():
 
 init_state()
 
-# ── Card Deck ─────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# CARD DECK
+# reward  = spaces moved forward on PASS (always >= 1, you always move on a pass)
+# penalty = drink punishment on FAIL ONLY — no movement on fail ever
+#
+# Easy   → reward 1, penalty "1 sip"
+# Medium → reward 2, penalty "3 sips"
+# Hard   → reward 3, penalty "finish your drink"
+# ─────────────────────────────────────────────────────────────────────────────
 CARDS = {
+
+    # ── TRIVIA ────────────────────────────────────────────────────────────────
     "trivia": [
-        # ── Upgraded from easiest (were reward:2 / 1 sip) ──
-        {"q": "Which film featured 'Ek Do Teen' originally, and name the actress who performed it?", "a": "Tezaab (1988); Madhuri Dixit", "reward": 2, "penalty": "1 sip"},
-        {"q": "Name the 3 leads of Dil Chahta Hai AND the director.", "a": "Aamir Khan, Akshaye Khanna, Saif Ali Khan; directed by Farhan Akhtar", "reward": 2, "penalty": "1 sip"},
-        {"q": "DDLJ released in 1995 — name the director AND the music composer.", "a": "Aditya Chopra; Jatin-Lalit", "reward": 2, "penalty": "1 sip"},
-        {"q": "Who directed 3 Idiots and name one other film he directed.", "a": "Rajkumar Hirani; Munna Bhai MBBS / PK / Sanju", "reward": 2, "penalty": "1 sip"},
-        {"q": "Which film featured 'Mogambo Khush Hua' and who played Mogambo?", "a": "Mr. India (1987); Amrish Puri", "reward": 2, "penalty": "1 sip"},
-        {"q": "Who played Poo in K3G, and name one other character Kareena played in a 2000s Bollywood hit.", "a": "Poo; e.g. Geet in Jab We Met / Kareena in Tashan etc.", "reward": 2, "penalty": "1 sip"},
-        {"q": "Lagaan is set during which British Indian period, and roughly what year?", "a": "British colonial era / 1893", "reward": 2, "penalty": "1 sip"},
-        {"q": "Kerala is 'God's Own Country' — name its capital and one famous festival.", "a": "Thiruvananthapuram; Onam / Thrissur Pooram", "reward": 2, "penalty": "1 sip"},
-        {"q": "Rabindranath Tagore wrote India's national anthem — name the other country whose anthem he also wrote.", "a": "Bangladesh (Amar Shonar Bangla)", "reward": 3, "penalty": "2 sips"},
-        {"q": "India's national animal is the Bengal Tiger — what is the national bird?", "a": "Indian Peacock (Pavo cristatus)", "reward": 2, "penalty": "1 sip"},
-        {"q": "Gateway of India is in Mumbai — in which year was it built and for which royal visit?", "a": "1924; King George V and Queen Mary", "reward": 3, "penalty": "2 sips"},
-        {"q": "India currently has 28 states — how many Union Territories?", "a": "8 Union Territories", "reward": 2, "penalty": "1 sip"},
-        {"q": "Kolkata is the 'City of Joy' — name the author who wrote a book with that title.", "a": "Dominique Lapierre", "reward": 3, "penalty": "2 sips"},
-        {"q": "Salman Khan is 'Bhai' — name all three of his Tiger franchise films.", "a": "Ek Tha Tiger, Tiger Zinda Hai, Tiger 3", "reward": 3, "penalty": "2 sips"},
-        {"q": "Gabbar Singh is the villain in Sholay — what is his most famous dialogue?", "a": "Kitne aadmi the? / Jo dar gaya, samjho mar gaya", "reward": 2, "penalty": "1 sip"},
-        {"q": "Which film had 'Chaiyya Chaiyya' and who was the playback singer?", "a": "Dil Se (1998); Sukhwinder Singh", "reward": 2, "penalty": "1 sip"},
-        {"q": "Bengaluru is the Silicon Valley of India — name India's second-largest IT hub city.", "a": "Hyderabad (or Pune)", "reward": 2, "penalty": "1 sip"},
-        {"q": "Abhinav Bindra won India's first individual Olympic gold — in which event and which city?", "a": "10m Air Rifle; Beijing 2008", "reward": 3, "penalty": "2 sips"},
-        {"q": "Rahul Dravid is 'The Wall' — how many Test centuries did he score?", "a": "36 Test centuries", "reward": 3, "penalty": "2 sips"},
-        {"q": "What does IPL stand for, and in which year was the first season played?", "a": "Indian Premier League; 2008", "reward": 2, "penalty": "1 sip"},
-        {"q": "Zindagi Na Milegi Dobara — name all three lead actors and one country it was filmed in.", "a": "Hrithik Roshan, Farhan Akhtar, Abhay Deol; Spain", "reward": 3, "penalty": "2 sips"},
-        {"q": "What is the full form of DDLJ, and where was the iconic mustard field scene shot?", "a": "Dilwale Dulhania Le Jayenge; Punjab / UK (filmed in UK)", "reward": 2, "penalty": "1 sip"},
-        {"q": "SRK played Aman in Kal Ho Na Ho — name the director of that film.", "a": "Nikkhil Advani", "reward": 3, "penalty": "2 sips"},
-        {"q": "Holi is the festival of colours — in which Hindu month does it traditionally fall?", "a": "Phalguna (Feb–March)", "reward": 3, "penalty": "2 sips"},
-        {"q": "Name the highest civilian award in India and two people who received it posthumously.", "a": "Bharat Ratna; e.g. Lata Mangeshkar (posthumous), Subhas Chandra Bose, BR Ambedkar etc.", "reward": 3, "penalty": "2 sips"},
-        {"q": "Arijit Singh sang 'Tum Hi Ho' — name the film and the lead actors.", "a": "Aashiqui 2; Aditya Roy Kapur and Shraddha Kapoor", "reward": 2, "penalty": "1 sip"},
-        {"q": "Sachin Tendulkar has the most ODI centuries — how many, and who is second?", "a": "49 centuries; Virat Kohli (50 in all formats but 46 in ODIs — accept reasonable answers)", "reward": 3, "penalty": "2 sips"},
-        {"q": "Amitabh Bachchan's 'angry young man' era began with Zanjeer — name the writer duo behind it.", "a": "Salim-Javed (Salim Khan & Javed Akhtar)", "reward": 3, "penalty": "2 sips"},
-        {"q": "Which Bollywood film is based on the 1983 Cricket World Cup and who plays Kapil Dev?", "a": "83 (2021); Ranveer Singh", "reward": 2, "penalty": "1 sip"},
-        {"q": "Which Indian state produces the most tea, and name one famous variety from it?", "a": "Assam; Assam CTC / Assam Orthodox / Brahmaputra tea", "reward": 3, "penalty": "2 sips"},
-        # ── Medium originals (kept as-is) ──
-        {"q": "Who composed the music for Mughal-E-Azam?", "a": "Naushad", "reward": 3, "penalty": "3 sips"},
-        {"q": "Which film won the first Indian Oscar nomination in 1958?", "a": "Mother India", "reward": 3, "penalty": "3 sips"},
-        {"q": "Which Bollywood film is set in a fictional kingdom called Rajputana?", "a": "Padmaavat", "reward": 3, "penalty": "3 sips"},
-        {"q": "Which city hosts the Kumbh Mela most famously?", "a": "Prayagraj (Allahabad)", "reward": 3, "penalty": "3 sips"},
-        {"q": "Which film won Aamir Khan his first Filmfare Best Actor?", "a": "Raja Hindustani (1996)", "reward": 3, "penalty": "3 sips"},
-        {"q": "Who is known as 'The Maestro' of Indian classical music?", "a": "Ravi Shankar", "reward": 3, "penalty": "3 sips"},
-        {"q": "Name the Indian who invented the game of Snakes and Ladders.", "a": "Gyandev (13th century)", "reward": 4, "penalty": "move back 1"},
-        # ── NEW harder trivia cards ──
-        {"q": "Name the only Indian film to win the Palme d'Or at Cannes and its director.", "a": "No Indian film has won — accept 'none' or discussions of Salaam Bombay (1988, nominated)", "reward": 4, "penalty": "move back 1"},
-        {"q": "Which Indian cricketer has the most Test wickets and how many?", "a": "Anil Kumble; 619 wickets", "reward": 3, "penalty": "3 sips"},
-        {"q": "Name the three Khans of Bollywood AND each one's biggest 2010s blockbuster.", "a": "Shah Rukh (Chennai Express/Dilwale), Salman (Bajrangi Bhaijaan/Sultan), Aamir (Dangal/PK)", "reward": 4, "penalty": "move back 1"},
-        {"q": "Which year did India win both the Cricket World Cup AND the Champions Trophy?", "a": "2013 (Champions Trophy); 1983 & 2011 (World Cup) — full answer: 2013 for CT", "reward": 4, "penalty": "3 sips"},
-        {"q": "Name Gulzar's birth name and one National Award-winning film he wrote.", "a": "Sampooran Singh Kalra; Maachis / Ijaazat / Aandhi etc.", "reward": 4, "penalty": "move back 1"},
-        {"q": "Which Hindi film holds the record for most weeks at #1 at the Indian box office?", "a": "Sholay (ran for over 5 years at some cinemas; 286 weeks at Minerva in Mumbai)", "reward": 4, "penalty": "3 sips"},
-        {"q": "Name the singer, lyricist, and music director of 'Jai Ho' from Slumdog Millionaire.", "a": "Sukhwinder Singh (singer); Gulzar (lyrics); AR Rahman (music)", "reward": 4, "penalty": "move back 1"},
-        {"q": "How many Filmfare awards has SRK won in total (approximately)?", "a": "14 Filmfare Awards (accept 12–16 range)", "reward": 3, "penalty": "2 sips"},
-        {"q": "Which Indian state has the most UNESCO World Heritage Sites?", "a": "Maharashtra (Ajanta, Ellora, Elephanta, Mumbai Victorian Gothic & Art Deco)", "reward": 4, "penalty": "3 sips"},
-        {"q": "Name the two Indian players in the ICC Cricket Hall of Fame as of 2023.", "a": "Sachin Tendulkar, Kapil Dev, Bishan Singh Bedi, Sunil Gavaskar (accept any two)", "reward": 3, "penalty": "2 sips"},
-        {"q": "In Taare Zameen Par, what learning disability does Ishaan have, and who directed the film?", "a": "Dyslexia; Aamir Khan", "reward": 3, "penalty": "2 sips"},
-        {"q": "Which classic Bollywood film was remade as 'The Magnificent Seven' of Indian cinema and features the song 'Yeh Dosti'?", "a": "Sholay", "reward": 3, "penalty": "2 sips"},
-        {"q": "Name India's first satellite and the year it was launched.", "a": "Aryabhata; 1975", "reward": 4, "penalty": "3 sips"},
-        {"q": "Which Indian author wrote 'The God of Small Things' and won the Booker Prize?", "a": "Arundhati Roy; 1997", "reward": 3, "penalty": "2 sips"},
-        {"q": "In Kabir Singh / Arjun Reddy, who directed the original Telugu version?", "a": "Sandeep Reddy Vanga", "reward": 3, "penalty": "2 sips"},
-        {"q": "Which Indian badminton player won back-to-back Olympics silver and bronze medals?", "a": "PV Sindhu (Silver 2016, Bronze 2020)", "reward": 3, "penalty": "2 sips"},
-        {"q": "Name the actor who played Bhiku Mhatre in Satya (1998) — the film that launched his career.", "a": "Manoj Bajpayee", "reward": 3, "penalty": "2 sips"},
-        {"q": "What is the real name of rapper Divine, the inspiration behind Gully Boy?", "a": "Vivian Fernandes", "reward": 4, "penalty": "3 sips"},
-        {"q": "In which year did Doordarshan begin colour broadcasts in India?", "a": "1982 (during the Asian Games in Delhi)", "reward": 4, "penalty": "move back 1"},
-        {"q": "Which Indian city is home to Tollywood (Telugu film industry)?", "a": "Hyderabad (Film City in Hyderabad)", "reward": 2, "penalty": "1 sip"},
-        {"q": "Name the Indian wrestler who won a gold medal at the 2018 Commonwealth Games and inspired Dangal.", "a": "Geeta Phogat (the film is inspired by the Phogat family, including Geeta & Babita)", "reward": 3, "penalty": "2 sips"},
+        # BOLLYWOOD — Easy (reward 1)
+        {"q": "Which film had the song 'Ek Do Teen'?", "a": "Tezaab (1988)", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which year did DDLJ release?", "a": "1995", "reward": 1, "penalty": "1 sip"},
+        {"q": "Who directed 3 Idiots?", "a": "Rajkumar Hirani", "reward": 1, "penalty": "1 sip"},
+        {"q": "Who played Poo in K3G?", "a": "Kareena Kapoor Khan", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which film had 'Mogambo Khush Hua'?", "a": "Mr. India (1987)", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which film had the song 'Chaiyya Chaiyya'?", "a": "Dil Se (1998)", "reward": 1, "penalty": "1 sip"},
+        {"q": "Who is known as 'Bhai' in Bollywood?", "a": "Salman Khan", "reward": 1, "penalty": "1 sip"},
+        {"q": "Name the villain in Sholay.", "a": "Gabbar Singh", "reward": 1, "penalty": "1 sip"},
+        {"q": "Who played Rancho in 3 Idiots?", "a": "Aamir Khan", "reward": 1, "penalty": "1 sip"},
+        {"q": "Who sang 'Tum Hi Ho'?", "a": "Arijit Singh", "reward": 1, "penalty": "1 sip"},
+        {"q": "Who played Aman in Kal Ho Na Ho?", "a": "Shah Rukh Khan", "reward": 1, "penalty": "1 sip"},
+        {"q": "Who directed Gully Boy?", "a": "Zoya Akhtar", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which film had the song 'Kuch Kuch Hota Hai'?", "a": "Kuch Kuch Hota Hai", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which cricketer is known as 'The Wall'?", "a": "Rahul Dravid", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does IPL stand for?", "a": "Indian Premier League", "reward": 1, "penalty": "1 sip"},
+        {"q": "Who is the Nightingale of India?", "a": "Lata Mangeshkar", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which actress is called 'Desi Girl'?", "a": "Priyanka Chopra", "reward": 1, "penalty": "1 sip"},
+        {"q": "Name India's first prime minister.", "a": "Jawaharlal Nehru", "reward": 1, "penalty": "1 sip"},
+        {"q": "Who built the Taj Mahal?", "a": "Shah Jahan", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which Indian city is the Silicon Valley of India?", "a": "Bengaluru", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which Indian state is called God's Own Country?", "a": "Kerala", "reward": 1, "penalty": "1 sip"},
+        {"q": "In which city is the Gateway of India?", "a": "Mumbai", "reward": 1, "penalty": "1 sip"},
+        {"q": "Who wrote India's national anthem?", "a": "Rabindranath Tagore", "reward": 1, "penalty": "1 sip"},
+        {"q": "What is India's national animal?", "a": "Bengal Tiger", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which year did India gain independence?", "a": "1947", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does DDLJ stand for?", "a": "Dilwale Dulhania Le Jayenge", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which film started Hrithik Roshan's career?", "a": "Kaho Naa... Pyaar Hai (2000)", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which Bollywood film is based on the 1983 Cricket World Cup?", "a": "83 (2021)", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'jugaad' mean?", "a": "A clever improvised fix", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which Indian festival is the festival of lights?", "a": "Diwali", "reward": 1, "penalty": "1 sip"},
+        {"q": "Who directed Dangal?", "a": "Nitesh Tiwari", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which city is India's film industry capital?", "a": "Mumbai", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which film featured the character Circuit?", "a": "Munna Bhai MBBS", "reward": 1, "penalty": "1 sip"},
+
+        # BOLLYWOOD / INDIA — Medium (reward 2)
+        {"q": "Which AR Rahman song won an Oscar?", "a": "Jai Ho (Slumdog Millionaire)", "reward": 2, "penalty": "3 sips"},
+        {"q": "Who was the first Indian to win an individual Olympic gold?", "a": "Abhinav Bindra, 2008", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which film was India's first Oscar nomination — in 1958?", "a": "Mother India", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which state produces the most tea in India?", "a": "Assam", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which Indian state has the longest coastline?", "a": "Gujarat", "reward": 2, "penalty": "3 sips"},
+        {"q": "Who was PM of India during the 1971 war?", "a": "Indira Gandhi", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which freedom fighter was called Netaji?", "a": "Subhas Chandra Bose", "reward": 2, "penalty": "3 sips"},
+        {"q": "What was the name of India's first satellite?", "a": "Aryabhata (1975)", "reward": 2, "penalty": "3 sips"},
+        {"q": "Who composed the Sholay soundtrack?", "a": "R.D. Burman", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which year did Sachin score his 100th international century?", "a": "2012", "reward": 2, "penalty": "3 sips"},
+        {"q": "What is the highest civilian award in India?", "a": "Bharat Ratna", "reward": 2, "penalty": "3 sips"},
+        {"q": "Who was the first woman to win an Olympic medal for India?", "a": "Karnam Malleswari, 2000", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which Indian classical dance originates from Tamil Nadu?", "a": "Bharatanatyam", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which Bollywood film had SRK, Kajol AND Rani Mukherjee?", "a": "Kuch Kuch Hota Hai", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which freedom fighter said 'Give me blood and I will give you freedom'?", "a": "Subhas Chandra Bose", "reward": 2, "penalty": "3 sips"},
+
+        # BOLLYWOOD / INDIA — Hard (reward 3)
+        {"q": "Which year did India first win the Cricket World Cup?", "a": "1983", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Name the composer behind Dil Chahta Hai's soundtrack.", "a": "Shankar-Ehsaan-Loy", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Which Bollywood film starred both Amitabh Bachchan and Rekha opposite each other?", "a": "Silsila (1981)", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Name the PM of India who declared the Emergency in 1975.", "a": "Indira Gandhi", "reward": 3, "penalty": "finish your drink"},
+        {"q": "How many states does India have?", "a": "28 states and 8 Union Territories", "reward": 3, "penalty": "finish your drink"},
+
+        # GEN Z / US STUDENT — Easy (reward 1)
+        {"q": "What does 'no cap' mean?", "a": "No lie / for real", "reward": 1, "penalty": "1 sip"},
+        {"q": "What is a situationship?", "a": "A romantic relationship with no official label", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'slay' mean in Gen Z slang?", "a": "To do something exceptionally well", "reward": 1, "penalty": "1 sip"},
+        {"q": "What is doom scrolling?", "a": "Endlessly scrolling through bad news or social media", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'touch grass' mean?", "a": "Go outside / get off the internet", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'ghosting' mean?", "a": "Cutting off contact with someone without explanation", "reward": 1, "penalty": "1 sip"},
+        {"q": "What is 'the ick'?", "a": "A sudden turn-off/disgust toward someone you liked", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does OPT stand for?", "a": "Optional Practical Training", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does FAFSA stand for?", "a": "Free Application for Federal Student Aid", "reward": 1, "penalty": "1 sip"},
+        {"q": "What is Spotify Wrapped?", "a": "Spotify's annual summary of your most-listened music", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'lowkey' mean?", "a": "Secretly / subtly", "reward": 1, "penalty": "1 sip"},
+        {"q": "What is a red flag in dating context?", "a": "A warning sign that someone may be bad for you", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'it's giving' mean?", "a": "It has the vibe of / it looks like", "reward": 1, "penalty": "1 sip"},
+        {"q": "What is a finsta?", "a": "A fake/private secondary Instagram account", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does STEM stand for?", "a": "Science, Technology, Engineering, Mathematics", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'understood the assignment' mean?", "a": "Someone did exactly what was needed, perfectly", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'rizz' mean?", "a": "Natural charm / ability to attract people", "reward": 1, "penalty": "1 sip"},
+        {"q": "What is 'gatekeeping'?", "a": "Keeping something exclusive / not sharing with others", "reward": 1, "penalty": "1 sip"},
+        {"q": "What is a 404 error?", "a": "Page not found", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'chronically online' mean?", "a": "Out of touch with real life from too much internet", "reward": 1, "penalty": "1 sip"},
+        {"q": "What is ChatGPT made by?", "a": "OpenAI", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'main character energy' mean?", "a": "Acting like you're the confident protagonist of your own life", "reward": 1, "penalty": "1 sip"},
+        {"q": "What app do most US college students use to pay each other back?", "a": "Venmo", "reward": 1, "penalty": "1 sip"},
+        {"q": "Which company owns Instagram and WhatsApp?", "a": "Meta", "reward": 1, "penalty": "1 sip"},
+        {"q": "What is the Duolingo owl's name?", "a": "Duo", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'delulu' mean in Gen Z slang?", "a": "Delusional — out of touch with reality about a situation", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'rent free' mean — as in living in someone's head?", "a": "They can't stop thinking about you", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'era' mean as Gen Z uses it — e.g. villain era?", "a": "A phase or period you're currently in", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'ate and left no crumbs' mean?", "a": "Did something perfectly, left nothing to criticise", "reward": 1, "penalty": "1 sip"},
+        {"q": "What does 'NPC' mean as an insult?", "a": "Someone who is robotic / has no personality of their own", "reward": 1, "penalty": "1 sip"},
+
+        # GEN Z / US STUDENT — Medium (reward 2)
+        {"q": "What does the H-1B visa allow?", "a": "Work in the US in a specialty occupation", "reward": 2, "penalty": "3 sips"},
+        {"q": "What is the cap on H-1B visas per year?", "a": "65,000 regular + 20,000 master's cap", "reward": 2, "penalty": "3 sips"},
+        {"q": "What does DOGE stand for in the US government?", "a": "Department of Government Efficiency", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which president was impeached twice?", "a": "Donald Trump", "reward": 2, "penalty": "3 sips"},
+        {"q": "What does APR stand for on a credit card?", "a": "Annual Percentage Rate", "reward": 2, "penalty": "3 sips"},
+        {"q": "What is the federal minimum wage in the US?", "a": "$7.25/hour", "reward": 2, "penalty": "3 sips"},
+        {"q": "What does the Bechdel Test check for in a film?", "a": "Whether 2+ women talk to each other about something other than a man", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which Indian-origin person is CEO of Google?", "a": "Sundar Pichai", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which Indian-origin person is CEO of Microsoft?", "a": "Satya Nadella", "reward": 2, "penalty": "3 sips"},
+        {"q": "Which rapper won the beef with Drake in 2024?", "a": "Kendrick Lamar", "reward": 2, "penalty": "3 sips"},
     ],
+
+    # ── ASSOCIATION ───────────────────────────────────────────────────────────
     "association": [
-        # ── Upgraded from easiest (were reward:2 / 1 sip) ──
-        {"q": "Shah Rukh Khan & Kajol", "a": "DDLJ / romantic Bollywood pair", "reward": 2, "penalty": "1 sip"},
-        {"q": "Sachin & Dravid", "a": "India's greatest batting pair / cricket legends", "reward": 2, "penalty": "1 sip"},
-        {"q": "Holi & Diwali", "a": "Major Hindu festivals", "reward": 2, "penalty": "1 sip"},
-        {"q": "Ranbir Kapoor & Alia Bhatt", "a": "Married couple / Brahmastra co-stars", "reward": 2, "penalty": "1 sip"},
-        {"q": "Chennai & Kolkata", "a": "IPL teams / India metro cities", "reward": 2, "penalty": "1 sip"},
-        {"q": "Paneer & Tofu", "a": "Vegetarian protein / soft white cheese alternatives", "reward": 2, "penalty": "1 sip"},
-        {"q": "Rasgulla & Gulab Jamun", "a": "Indian mithai / syrup-soaked sweets", "reward": 2, "penalty": "1 sip"},
-        {"q": "Virat Kohli & MS Dhoni", "a": "Indian cricket captains", "reward": 2, "penalty": "1 sip"},
-        {"q": "Mumbai & Delhi", "a": "India's two biggest metro cities", "reward": 2, "penalty": "1 sip"},
-        {"q": "Naan & Roti", "a": "Indian flatbreads", "reward": 2, "penalty": "1 sip"},
-        {"q": "Rohit Sharma & Shikhar Dhawan", "a": "India's ODI opening pair", "reward": 2, "penalty": "1 sip"},
-        {"q": "Rajasthan & Gujarat", "a": "Neighbouring western Indian states", "reward": 2, "penalty": "1 sip"},
-        {"q": "Masala chai & Filter coffee", "a": "Iconic Indian hot beverages", "reward": 2, "penalty": "1 sip"},
-        {"q": "Salman Khan & Katrina Kaif", "a": "Tiger franchise / former rumoured couple", "reward": 2, "penalty": "1 sip"},
-        {"q": "Bhangra & Garba", "a": "Regional Indian folk dances (Punjab & Gujarat)", "reward": 2, "penalty": "1 sip"},
-        {"q": "Gandhi & Nehru", "a": "Indian independence movement leaders", "reward": 2, "penalty": "1 sip"},
-        {"q": "Samosa & Pakora", "a": "Classic Indian fried street snacks", "reward": 2, "penalty": "1 sip"},
-        {"q": "KBC & Bigg Boss", "a": "India's biggest TV game/reality shows", "reward": 2, "penalty": "1 sip"},
-        # ── Medium originals (kept) ──
-        {"q": "Amitabh Bachchan & Dharmendra", "a": "Sholay", "reward": 3, "penalty": "3 sips"},
-        {"q": "Biryani & Nihari", "a": "Mughlai cuisine", "reward": 3, "penalty": "3 sips"},
-        {"q": "Arijit Singh & Atif Aslam", "a": "Bollywood/Pakistani playback singers", "reward": 3, "penalty": "3 sips"},
-        {"q": "Karan Johar & Farah Khan", "a": "Bollywood directors and best friends", "reward": 3, "penalty": "3 sips"},
-        {"q": "Taj Mahal & Qutub Minar", "a": "UNESCO Mughal-era World Heritage Sites", "reward": 3, "penalty": "3 sips"},
-        {"q": "Priyanka Chopra & Deepika Padukone", "a": "Bollywood actresses turned global icons", "reward": 3, "penalty": "3 sips"},
-        {"q": "AR Rahman & Anu Malik", "a": "Bollywood music composers", "reward": 3, "penalty": "3 sips"},
-        {"q": "Akbar & Ashoka", "a": "India's greatest emperors", "reward": 3, "penalty": "3 sips"},
-        {"q": "Paan & Supari", "a": "Post-meal Indian mouth fresheners", "reward": 3, "penalty": "3 sips"},
-        {"q": "Lata Mangeshkar & Asha Bhosle", "a": "Legendary playback singer sisters", "reward": 3, "penalty": "3 sips"},
-        {"q": "Rang De Basanti & Swades", "a": "Patriotic Bollywood films of the 2000s", "reward": 3, "penalty": "3 sips"},
-        {"q": "Doordarshan & Star Plus", "a": "Indian television channels (government vs. private)", "reward": 3, "penalty": "3 sips"},
-        # ── NEW harder association cards ──
-        {"q": "Naseeruddin Shah & Om Puri", "a": "Parallel cinema legends / FTII alumni", "reward": 3, "penalty": "3 sips"},
-        {"q": "Rekha & Amitabh Bachchan", "a": "Bollywood's most legendary rumoured affair / Silsila", "reward": 3, "penalty": "2 sips"},
-        {"q": "Vishal & Shekhar", "a": "Bollywood composer duo (Vishal Dadlani & Shekhar Ravjiani)", "reward": 4, "penalty": "3 sips"},
-        {"q": "Shoojit Sircar & Juhi Chaturvedi", "a": "Director-writer duo (Piku, Vicky Donor, Gulabo Sitabo)", "reward": 4, "penalty": "move back 1"},
-        {"q": "Baahubali & RRR", "a": "SS Rajamouli's epic Telugu blockbusters", "reward": 3, "penalty": "2 sips"},
-        {"q": "Diljit Dosanjh & AP Dhillon", "a": "Punjabi artists who broke internationally", "reward": 3, "penalty": "2 sips"},
-        {"q": "Irrfan Khan & Nawazuddin Siddiqui", "a": "Critically acclaimed character actors from parallel Bollywood", "reward": 3, "penalty": "2 sips"},
-        {"q": "Shankar, Ehsaan & Loy", "a": "Bollywood composer trio (Dil Chahta Hai, Kal Ho Na Ho)", "reward": 4, "penalty": "3 sips"},
-        {"q": "Pooja Bhatt & Mahesh Bhatt", "a": "Father-daughter Bollywood filmmaker duo", "reward": 3, "penalty": "2 sips"},
-        {"q": "Sacred Games & Mirzapur", "a": "Indian crime drama web series (Netflix & Prime)", "reward": 3, "penalty": "2 sips"},
-        {"q": "Panchayat & Kota Factory", "a": "TVF Indian web series", "reward": 3, "penalty": "2 sips"},
-        {"q": "Yo Yo Honey Singh & Badshah", "a": "Desi hip-hop / Punjabi rap artists", "reward": 2, "penalty": "1 sip"},
-        {"q": "Zoya Akhtar & Reema Kagti", "a": "Director-writer duo (Gully Boy, Talaash, Made in Heaven)", "reward": 4, "penalty": "move back 1"},
-        {"q": "Rajkummar Rao & Pankaj Tripathi", "a": "Mirzapur / critically acclaimed actors from small-town India", "reward": 3, "penalty": "2 sips"},
-        {"q": "Chhod Do Aanchal & Mera Joota Hai Japani", "a": "Classic Raj Kapoor songs / 1950s Bollywood", "reward": 4, "penalty": "move back 1"},
+        # Easy (reward 1)
+        {"q": "Shah Rukh Khan & Kajol", "a": "DDLJ", "reward": 1, "penalty": "1 sip"},
+        {"q": "Holi & Diwali", "a": "Indian festivals", "reward": 1, "penalty": "1 sip"},
+        {"q": "Naan & Roti", "a": "Indian bread", "reward": 1, "penalty": "1 sip"},
+        {"q": "Rasgulla & Gulab Jamun", "a": "Indian sweets", "reward": 1, "penalty": "1 sip"},
+        {"q": "Samosa & Pakora", "a": "Fried Indian snacks", "reward": 1, "penalty": "1 sip"},
+        {"q": "Gandhi & Nehru", "a": "Indian independence leaders", "reward": 1, "penalty": "1 sip"},
+        {"q": "Bhangra & Garba", "a": "Indian dances", "reward": 1, "penalty": "1 sip"},
+        {"q": "Virat Kohli & MS Dhoni", "a": "Indian cricket captains", "reward": 1, "penalty": "1 sip"},
+        {"q": "Ranbir Kapoor & Alia Bhatt", "a": "Married Bollywood couple", "reward": 1, "penalty": "1 sip"},
+        {"q": "Masala chai & Filter coffee", "a": "Indian hot drinks", "reward": 1, "penalty": "1 sip"},
+        {"q": "KBC & Bigg Boss", "a": "Indian TV shows", "reward": 1, "penalty": "1 sip"},
+        {"q": "Taj Mahal & Qutub Minar", "a": "Indian monuments", "reward": 1, "penalty": "1 sip"},
+        {"q": "Paneer & Tofu", "a": "Vegetarian protein", "reward": 1, "penalty": "1 sip"},
+        {"q": "Arijit Singh & Atif Aslam", "a": "Playback singers", "reward": 1, "penalty": "1 sip"},
+        {"q": "Salman Khan & Katrina Kaif", "a": "Tiger franchise / former couple", "reward": 1, "penalty": "1 sip"},
+        {"q": "Amitabh Bachchan & Dharmendra", "a": "Sholay co-stars", "reward": 1, "penalty": "1 sip"},
+        {"q": "Netflix & Hotstar", "a": "Streaming platforms", "reward": 1, "penalty": "1 sip"},
+        {"q": "Venmo & Zelle", "a": "US payment apps", "reward": 1, "penalty": "1 sip"},
+        {"q": "ChatGPT & Gemini", "a": "AI chatbots", "reward": 1, "penalty": "1 sip"},
+        {"q": "Uber Eats & DoorDash", "a": "Food delivery apps", "reward": 1, "penalty": "1 sip"},
+        {"q": "LinkedIn & Handshake", "a": "Job hunting platforms", "reward": 1, "penalty": "1 sip"},
+        {"q": "GRE & GMAT", "a": "Graduate school entrance exams", "reward": 1, "penalty": "1 sip"},
+        {"q": "Chipotle & Qdoba", "a": "Mexican-American fast casual chains", "reward": 1, "penalty": "1 sip"},
+        {"q": "Rang De Basanti & Swades", "a": "Patriotic Bollywood films", "reward": 1, "penalty": "1 sip"},
+        {"q": "Doordarshan & Star Plus", "a": "Indian TV channels", "reward": 1, "penalty": "1 sip"},
+        {"q": "Zomato & Swiggy", "a": "Indian food delivery apps", "reward": 1, "penalty": "1 sip"},
+        {"q": "Taylor Swift & Beyoncé", "a": "Biggest concert tours of 2023", "reward": 1, "penalty": "1 sip"},
+        {"q": "Spotify & Apple Music", "a": "Music streaming rivals", "reward": 1, "penalty": "1 sip"},
+        {"q": "Reddit & Twitter/X", "a": "Social media / internet forums", "reward": 1, "penalty": "1 sip"},
+        {"q": "OPT & CPT", "a": "US work authorisations for international students", "reward": 1, "penalty": "1 sip"},
+
+        # Medium (reward 2)
+        {"q": "Lata Mangeshkar & Asha Bhosle", "a": "Legendary singer sisters", "reward": 2, "penalty": "3 sips"},
+        {"q": "AR Rahman & Anu Malik", "a": "Bollywood music composers", "reward": 2, "penalty": "3 sips"},
+        {"q": "Akbar & Ashoka", "a": "Indian emperors", "reward": 2, "penalty": "3 sips"},
+        {"q": "Karan Johar & Farah Khan", "a": "Bollywood directors", "reward": 2, "penalty": "3 sips"},
+        {"q": "Priyanka Chopra & Deepika Padukone", "a": "Bollywood actresses who went global", "reward": 2, "penalty": "3 sips"},
+        {"q": "Elon Musk & Sam Altman", "a": "Tech billionaires / AI rivals", "reward": 2, "penalty": "3 sips"},
+        {"q": "OpenAI & Anthropic", "a": "AI companies", "reward": 2, "penalty": "3 sips"},
+        {"q": "Sundar Pichai & Satya Nadella", "a": "Indian-origin tech CEOs", "reward": 2, "penalty": "3 sips"},
+        {"q": "Kendrick Lamar & Drake", "a": "2024 rap beef", "reward": 2, "penalty": "3 sips"},
+        {"q": "F1 visa & J1 visa", "a": "US student / exchange visas", "reward": 2, "penalty": "3 sips"},
+        {"q": "Biryani & Nihari", "a": "Mughlai slow-cooked dishes", "reward": 2, "penalty": "3 sips"},
+        {"q": "Rohit Sharma & Shikhar Dhawan", "a": "India's opening batsmen", "reward": 2, "penalty": "3 sips"},
+        {"q": "Paan & Supari", "a": "Post-meal mouth fresheners", "reward": 2, "penalty": "3 sips"},
     ],
+
+    # ── ACTION ────────────────────────────────────────────────────────────────
     "action": [
-        {"q": "Do the hook step from 'Chaiyya Chaiyya' for 10 seconds.", "a": "Group votes pass/fail.", "reward": 4, "penalty": "3 sips"},
-        {"q": "Sing the first verse of any Bollywood song. No stopping.", "a": "Group votes.", "reward": 3, "penalty": "3 sips"},
-        {"q": "Do your best SRK arms-spread pose and hold for 5 seconds.", "a": "Group rates 1–10. Below 6 = fail.", "reward": 3, "penalty": "1 sip"},
-        {"q": "Mimic a Bollywood dramatic slow-motion crying scene.", "a": "Group votes pass/fail.", "reward": 4, "penalty": "3 sips"},
-        {"q": "Be a cricket commentator for 20 seconds on whatever is happening in the room.", "a": "Must not stop.", "reward": 3, "penalty": "3 sips"},
-        {"q": "Teach the group one step of Bhangra or Garba. Everyone tries it.", "a": "Worst student sips, teacher scores.", "reward": 4, "penalty": "3 sips"},
-        {"q": "Act out a full auto-rickshaw price negotiation — play both driver and passenger.", "a": "Group votes.", "reward": 4, "penalty": "3 sips"},
-        {"q": "Do 10 squats while singing any IPL theme or jingle.", "a": "Stop mid-way = fail.", "reward": 3, "penalty": "3 sips"},
-        {"q": "Say the tongue twister 'Kaccha papad, pakka papad' 5 times fast.", "a": "No mistakes allowed.", "reward": 3, "penalty": "1 sip"},
-        {"q": "Impersonate any Bollywood villain for 10 seconds.", "a": "Group votes.", "reward": 4, "penalty": "3 sips"},
-        {"q": "Do the Daler Mehndi 'Tunak Tunak' arm move for 15 seconds.", "a": "Full commitment required.", "reward": 3, "penalty": "1 sip"},
-        {"q": "Recreate the Sholay 'Kitne aadmi the?' dialogue exchange with another player.", "a": "Both must know their lines.", "reward": 4, "penalty": "3 sips"},
-        {"q": "Hum any Bollywood song. Others must guess the film within 15 seconds.", "a": "No words, only humming.", "reward": 3, "penalty": "1 sip"},
-        {"q": "Do an impression of an Indian mom scolding someone for 15 seconds — must include a chappai threat.", "a": "Group votes pass/fail.", "reward": 3, "penalty": "2 sips"},
-        {"q": "Say the English alphabet backwards in 20 seconds.", "a": "Timed. Fail = miss a letter.", "reward": 4, "penalty": "move back 1"},
-        {"q": "Pose for a 'saas-bahu' drama screenshot for 5 seconds. Maximum expression.", "a": "Group votes most dramatic.", "reward": 3, "penalty": "1 sip"},
-        {"q": "Speak only in questions for the next 60 seconds.", "a": "Any statement = fail.", "reward": 3, "penalty": "3 sips"},
-        {"q": "Do your best Govinda dance move for 10 seconds.", "a": "Group votes.", "reward": 3, "penalty": "1 sip"},
-        {"q": "Name 5 Bollywood films from the 90s in 10 seconds.", "a": "Timed.", "reward": 3, "penalty": "3 sips"},
-        {"q": "Recreate the DDLJ train scene — you need one other player.", "a": "Both must commit.", "reward": 5, "penalty": "move back 1"},
-        {"q": "Do a 15-second Bollywood item number. Choose your song.", "a": "Group votes.", "reward": 4, "penalty": "3 sips"},
-        {"q": "Describe your morning routine entirely in a Bollywood dramatic monologue style.", "a": "Must last 20 seconds.", "reward": 4, "penalty": "3 sips"},
-        {"q": "Freestyle rap for 15 seconds about someone in the room. In Hindi or English.", "a": "Group votes.", "reward": 5, "penalty": "move back 1"},
-        {"q": "Do the 'nagin dance' for 10 seconds.", "a": "Group votes pass/fail.", "reward": 3, "penalty": "1 sip"},
-        {"q": "Pretend to negotiate at a street market. Buy something from someone in the room.", "a": "Must get the price down.", "reward": 4, "penalty": "3 sips"},
-        # ── NEW action cards ──
-        {"q": "Do your best 'Lungi Dance' move for 10 seconds — full energy.", "a": "Group votes pass/fail. No half-measures.", "reward": 4, "penalty": "2 sips"},
-        {"q": "In an Indian accent, pitch a saas-bahu show to the group in 20 seconds.", "a": "Must include a villain, a crying scene, and a dramatic pause.", "reward": 4, "penalty": "3 sips"},
-        {"q": "Recreate the Kuch Kuch Hota Hai basketball game — you need one other person, no ball needed.", "a": "Group votes on commitment.", "reward": 4, "penalty": "2 sips"},
-        {"q": "You are a news anchor on Arnab Goswami mode. Report on whatever snack is nearest to you. 20 seconds.", "a": "Volume and intensity judged by group.", "reward": 4, "penalty": "3 sips"},
-        {"q": "Do an impression of a Bollywood hero proposing in the rain for 15 seconds.", "a": "Must reference flowers, slow-mo, and eye contact.", "reward": 4, "penalty": "2 sips"},
-        {"q": "Without using the words 'film', 'movie', 'Bollywood', describe Dilwale Dulhania Le Jayenge in 30 seconds. Group must guess.", "a": "Timed. No banned words.", "reward": 4, "penalty": "3 sips"},
-        {"q": "Mime a classic Bollywood death scene for 15 seconds. Group must name the film it reminds them of.", "a": "Most dramatic mime wins the group's approval.", "reward": 4, "penalty": "2 sips"},
-        {"q": "Teach the group a 10-second hook-step from any song that is NOT from the 90s.", "a": "Song must be named. Group replicates it.", "reward": 4, "penalty": "2 sips"},
-        {"q": "Do a 20-second impression of a strict Indian college professor catching someone cheating.", "a": "Group votes pass/fail.", "reward": 3, "penalty": "2 sips"},
-        {"q": "You have 15 seconds to beatbox the tune of 'Bole Chudiyan'. Go.", "a": "Group votes pass/fail.", "reward": 3, "penalty": "1 sip"},
-        {"q": "Act out ordering a large family meal at a dhaba — you are simultaneously 4 different family members all disagreeing.", "a": "All 4 voices required. Group votes.", "reward": 5, "penalty": "move back 1"},
-        {"q": "Sing 10 seconds of a Himesh Reshammiya song in his exact nasal style — nose movement mandatory.", "a": "Group votes. Authenticity judged harshly.", "reward": 3, "penalty": "2 sips"},
+        # Standard (reward 2)
+        {"q": "Do the hook step from 'Chaiyya Chaiyya' for 10 seconds.", "a": "Group votes pass or fail.", "reward": 2, "penalty": "3 sips"},
+        {"q": "Sing the chorus of any Bollywood song right now. No stopping.", "a": "Group votes.", "reward": 2, "penalty": "3 sips"},
+        {"q": "Hold the SRK arms-spread pose for 5 seconds. No smiling.", "a": "Group rates out of 10. Below 6 = fail.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Mimic a Bollywood slow-motion crying scene. Go all out.", "a": "Group votes pass or fail.", "reward": 2, "penalty": "3 sips"},
+        {"q": "Live cricket commentary for 20 seconds on what is happening in this room right now.", "a": "Cannot stop speaking.", "reward": 2, "penalty": "3 sips"},
+        {"q": "Do the Daler Mehndi Tunak Tunak arm wiggle for 15 seconds.", "a": "Full commitment. No exceptions.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Do an impression of an Indian mom finding out you got a B+.", "a": "Group votes pass or fail.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Do the nagin dance for 10 seconds.", "a": "Group votes pass or fail.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Do your best Govinda-style dance move for 10 seconds.", "a": "Group votes.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Do 10 squats while singing any Bollywood song.", "a": "Stop mid-way = fail.", "reward": 2, "penalty": "3 sips"},
+        {"q": "Hum a Bollywood song. Everyone must guess the film within 15 seconds.", "a": "No words allowed.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Teach the group one Bhangra or Garba step. Everyone tries it.", "a": "Worst student sips. You get the reward.", "reward": 2, "penalty": "3 sips"},
+        {"q": "Say the Hindi tongue twister 'Kaccha papad pakka papad' 3 times fast.", "a": "Without messing up.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Impersonate any Bollywood villain for 10 seconds.", "a": "Group votes.", "reward": 2, "penalty": "3 sips"},
+        {"q": "Pose for a saas-bahu drama screenshot for 5 seconds. Maximum expression.", "a": "Group votes most dramatic.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Do your best impression of a confused aunty using a smartphone.", "a": "Group votes.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Say 'I love you' in 5 different languages in 15 seconds.", "a": "Timed. Miss one = fail.", "reward": 2, "penalty": "3 sips"},
+        {"q": "Describe your last situationship in one sentence. Everyone guesses how long it lasted.", "a": "Closest guess = 1 bonus space.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Act out an auto-rickshaw price negotiation — play both driver and passenger.", "a": "Group votes.", "reward": 2, "penalty": "3 sips"},
+        {"q": "Recreate the 'Kitne aadmi the?' Sholay exchange with the person next to you.", "a": "Both must commit. Group votes.", "reward": 2, "penalty": "3 sips"},
+        {"q": "Do a 15-second item number. Choose your song. Commit fully.", "a": "Group votes.", "reward": 2, "penalty": "3 sips"},
+        {"q": "React to finding out your university added a mandatory 7am class. Full Bollywood drama.", "a": "Must include at least one anguished look at the sky.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Do a 15-second breakdown reacting to Chipotle raising prices again.", "a": "Full dramatic breakdown required.", "reward": 2, "penalty": "1 sip"},
+        {"q": "In 15 seconds: pretend you're on a video call with your parents asking when you're getting married.", "a": "Group votes on authenticity.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Do an impression of someone rage-quitting a group project at midnight the day it is due.", "a": "Must include at least one passive-aggressive message being typed.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Name the most LinkedIn-brained thing you have ever done. Be honest.", "a": "Group votes most cringe.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Do your best impression of someone explaining their startup idea at 2am to people who did not ask.", "a": "Must mention disruption, scale, or AI.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Do a flawless desi aunty impression judging someone's life choices for 15 seconds.", "a": "Must mention marks, marriage, or a cousin comparison.", "reward": 2, "penalty": "3 sips"},
+        {"q": "In 15 seconds: cold open a podcast about Indian student life in the US. Give it a name.", "a": "Must have a name, topic, and hook.", "reward": 2, "penalty": "1 sip"},
+        {"q": "Recreate the DDLJ train scene with another player. You choose who.", "a": "Both must fully commit. No half measures.", "reward": 2, "penalty": "3 sips"},
+
+        # Hard (reward 3)
+        {"q": "Freestyle rap for 15 seconds about someone in the room. Hindi or English.", "a": "Group votes. Must be at least semi-coherent.", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Pitch your life to Shark Tank in 20 seconds. State your valuation.", "a": "Group votes on whether they would invest.", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Explain what the H-1B lottery is to a 5 year old. 15 seconds. No jargon.", "a": "Group votes on clarity.", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Say the alphabet backwards in 20 seconds.", "a": "Timed. Miss a letter = fail.", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Give a full 30-second TED Talk on why your team will win. Your most professional voice.", "a": "Group votes on conviction.", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Describe your situationship history as a Bollywood film synopsis in 20 seconds.", "a": "Must have a title, a hero, and a villain.", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Roast the person to your left for 15 seconds. Desi aunty style.", "a": "No personal trauma. Just vibes. Group votes.", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Name 5 Bollywood films from the 90s in 10 seconds.", "a": "Timed. Must get all 5.", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Speak only in questions for the next 90 seconds. Any statement = fail.", "a": "Rest of the room enforces it.", "reward": 3, "penalty": "finish your drink"},
+        {"q": "Actually text your mom right now that you are 'not sure about grad school anymore'. Show the room.", "a": "Must actually send it. Timer starts now.", "reward": 3, "penalty": "finish your drink"},
     ],
+
+    # ── WILDCARD ──────────────────────────────────────────────────────────────
     "wildcard": [
-        {"q": "HINDI ONLY: For the next 2 minutes, no English from anyone. Each English word = 1 sip. Appoint a language police.", "a": "Strict enforcement.", "reward": 3, "penalty": "move back 1"},
-        {"q": "DOUBLE OR NOTHING: Answer next trivia right = move 4 spaces. Wrong = finish your drink. Commit before the question is read.", "a": "No backing out.", "reward": 4, "penalty": "move back 1"},
-        {"q": "TEAM CHALLENGE: Your whole team must do 5 jumping jacks simultaneously. First team to finish wins a cup attempt. Lose = 1 sip each.", "a": "All members must complete.", "reward": 4, "penalty": "1 sip"},
-        {"q": "SILENT ROUND: No speaking for 60 seconds. Any sound from anyone = 1 sip per person who made noise.", "a": "Clock starts now.", "reward": 3, "penalty": "3 sips"},
-        {"q": "COMPLIMENT CIRCLE: Everyone gives the person to their left a genuine compliment in 10 seconds each. Laugh mid-compliment = sip.", "a": "Keep a straight face.", "reward": 3, "penalty": "1 sip"},
-        {"q": "AZADI CALL: Shout 'Azadi!' — everyone must reply 'Inquilab Zindabad!' Anyone who doesn't = 3 sips. You move 3 spaces.", "a": "Instant.", "reward": 3, "penalty": "3 sips"},
-        {"q": "SWAP SPACES: You and any player of your choice swap board positions right now.", "a": "No refusals.", "reward": 3, "penalty": "1 sip"},
-        {"q": "STEAL A CUP: If your team has fewer cups than the leading team, steal one cup from them right now. They can challenge with a thumb war.", "a": "Thumb war decides.", "reward": 5, "penalty": "move back 1"},
-        {"q": "REVERSE CARD: The next person to draw a card must do the challenge twice. You move 2 spaces now.", "a": "Announce it loudly.", "reward": 2, "penalty": "1 sip"},
-        {"q": "MOST DESI: Go around the room — everyone shares the most desi thing their parents have said to them. Group votes funniest. Winner moves 2 extra spaces.", "a": "Group vote.", "reward": 2, "penalty": "1 sip"},
-        {"q": "HONEST HOUR: Name one Bollywood film you've pretended to have seen but haven't. Anyone who catches you lying = you sip.", "a": "Honour system.", "reward": 2, "penalty": "1 sip"},
-        {"q": "LAVA TRAP: Point at any player. If they move in the next 30 seconds (even slightly), their team loses a cup. You get to watch.", "a": "Judge decides movement.", "reward": 4, "penalty": "move back 1"},
-        {"q": "SPEED ROUND: Everyone simultaneously shouts a Bollywood actor name. Any duplicates must sip. Last unique name standing moves 3 spaces.", "a": "Simultaneous.", "reward": 3, "penalty": "1 sip"},
-        {"q": "PHONE TAX: Everyone who has Instagram on their phone right now takes 1 sip. You move 2 spaces free.", "a": "Honour system.", "reward": 2, "penalty": "1 sip"},
-        {"q": "MEMORY TEST: The player draws another card and reads only the question. Must answer without any hints. Succeed = 5 spaces. Fail = move back 1.", "a": "No hints from anyone.", "reward": 5, "penalty": "move back 1"},
-        # ── NEW wildcard cards ──
-        {"q": "TEAM ROAST: Your team has 90 seconds to roast any other team. The roasted team votes 1–10. Score below 6 = your whole team takes 2 sips each.", "a": "Keep it fun. Group rates.", "reward": 4, "penalty": "2 sips"},
-        {"q": "ACCENT ROULETTE: Everyone speaks in a different Indian regional accent for the next 3 turns. Whoever breaks first takes 3 sips.", "a": "Accents assigned by group (Punjabi, Tamilian, Bengali, Hyderabadi, etc.)", "reward": 3, "penalty": "3 sips"},
-        {"q": "WRONG LYRICS: Sing any Bollywood chorus with completely wrong (but plausible-sounding) lyrics. Group votes if it was convincing.", "a": "Must be sung, not spoken.", "reward": 3, "penalty": "2 sips"},
-        {"q": "WEDDING DJ: You are the DJ at a desi wedding. Call out 3 songs back to back (just the titles and first line). Group must vote if they'd dance.", "a": "Need 3 different songs. Majority vote decides.", "reward": 3, "penalty": "1 sip"},
-        {"q": "SHAADI NEGOTIATION: Two players. One is the bride's father, one is the groom's father negotiating the wedding venue. 45 seconds. Funniest outcome wins.", "a": "Group votes winner. Loser takes 2 sips.", "reward": 4, "penalty": "2 sips"},
-        {"q": "WHATSAPP FORWARD: Deliver the most convincing fake 'good morning' WhatsApp uncle/aunty forward in 20 seconds. Must include a motivational quote and a God's blessing.", "a": "Group votes most authentic.", "reward": 3, "penalty": "1 sip"},
-        {"q": "POWER MOVE: You may add 1 cup to your team's score right now — BUT you must first do 20 push-ups, accepted or not by the group.", "a": "Push-ups must be full. Group counts.", "reward": 5, "penalty": "move back 1"},
-        {"q": "BOLLYWOOD BINGO: Name a Bollywood film for every letter in 'INDIA' in 30 seconds. All 5 must be different.", "a": "I-N-D-I-A. No repeats. Timed.", "reward": 4, "penalty": "3 sips"},
-        {"q": "DESI CONFESSIONAL: Confess the most 'desi parent nightmare' thing you did in college without getting caught. Group votes if believable.", "a": "Honour system. Vote decides.", "reward": 3, "penalty": "1 sip"},
-        {"q": "FREEZE FRAME: Call 'Freeze!' — everyone must hold their position for 15 seconds. Anyone who moves, their team loses 1 sip each. You move 3 spaces free.", "a": "You are exempt. Everyone else freezes.", "reward": 3, "penalty": "3 sips"},
-    ]
+        {"q": "HINDI ONLY: For the next 2 minutes, no English from anyone. Each English word = 1 sip. Appoint a language police now.", "a": "Strict enforcement. No exceptions.", "reward": 2, "penalty": "3 sips"},
+        {"q": "DOUBLE OR NOTHING: Commit before the next card is read. Pass = move 4 spaces. Fail = finish your drink.", "a": "No backing out once you say yes.", "reward": 4, "penalty": "finish your drink"},
+        {"q": "TEAM CHALLENGE: Your whole team does 5 jumping jacks simultaneously. First team done = bonus cup attempt. Your team loses = 1 sip each.", "a": "All members must complete.", "reward": 2, "penalty": "1 sip"},
+        {"q": "SILENT ROUND: No speaking for 60 seconds. Any sound = 1 sip per offender.", "a": "Clock starts now.", "reward": 2, "penalty": "3 sips"},
+        {"q": "AZADI CALL: Shout Azadi — everyone must reply Inquilab Zindabad. Anyone who does not = 3 sips. You move 2 spaces.", "a": "Instant. No warning allowed.", "reward": 2, "penalty": "3 sips"},
+        {"q": "STEAL A CUP: Challenge the leading team to a thumb war. Win = steal their cup. Lose = 3 sips.", "a": "Thumb war is law.", "reward": 3, "penalty": "3 sips"},
+        {"q": "REVERSE CARD: The next player to draw must do their challenge twice. You move 2 spaces now.", "a": "Announce it loudly. It is binding.", "reward": 2, "penalty": "1 sip"},
+        {"q": "MOST DESI: Everyone shares the most desi thing their parents have ever said. Group votes funniest. Winner moves 2 extra spaces.", "a": "Group vote decides.", "reward": 2, "penalty": "1 sip"},
+        {"q": "PHONE TAX: Everyone who has Instagram open on their phone right now takes 1 sip. You move 2 spaces free.", "a": "Honour system. We will judge you.", "reward": 2, "penalty": "1 sip"},
+        {"q": "SPEED ROUND: Everyone simultaneously shouts a Bollywood actor name. Duplicates sip. Last unique name standing moves 2 spaces.", "a": "No pre-planning.", "reward": 2, "penalty": "1 sip"},
+        {"q": "HONEST HOUR: Name one Bollywood film you have pretended to have seen but have not. Anyone who calls your bluff = you finish your drink.", "a": "Honour system.", "reward": 2, "penalty": "3 sips"},
+        {"q": "LAVA TRAP: Point at any player. If they visibly move in the next 30 seconds their team loses a cup. You watch.", "a": "No warning given to target.", "reward": 2, "penalty": "1 sip"},
+        {"q": "GPA CHECK: Anyone with above a 3.7 GPA takes a sip. Anyone below 3.0 moves 2 spaces — you are built different.", "a": "Honour system.", "reward": 2, "penalty": "1 sip"},
+        {"q": "LINKEDIN PURGE: The last person to post on LinkedIn must finish their drink. Profiles will be checked.", "a": "If nobody has posted, whoever most recently liked a post drinks.", "reward": 2, "penalty": "3 sips"},
+        {"q": "SITUATIONSHIP TAX: Anyone currently in a situationship takes 1 sip. Anyone who claims they are not but everyone knows they are = 3 sips.", "a": "Group enforces this democratically.", "reward": 2, "penalty": "1 sip"},
+        {"q": "MEMORY TEST: Draw another card. Read only the question. Answer without any help. Pass = 4 spaces. Fail = finish your drink.", "a": "No hints. No conferring. No mercy.", "reward": 4, "penalty": "finish your drink"},
+        {"q": "COMPLIMENT CIRCLE: Everyone gives the person to their left a genuine compliment in 10 seconds. Laugh or visibly cringe = sip.", "a": "Keep a straight face.", "reward": 2, "penalty": "1 sip"},
+        {"q": "FINSTA CONFESSION: Anyone who has or has ever had a finsta takes 1 sip. Anyone who has NEVER had one takes 2 sips — suspicious.", "a": "Honour system.", "reward": 2, "penalty": "1 sip"},
+        {"q": "GROUP CHAT CHECK: Whoever has the most unread WhatsApp messages right now finishes their drink. Show your screens.", "a": "Most unread loses.", "reward": 2, "penalty": "3 sips"},
+        {"q": "CALLBACK: The last person who drew a card must redo their challenge — but this time in a different language or accent.", "a": "Group votes pass or fail.", "reward": 2, "penalty": "3 sips"},
+    ],
 }
 
 def get_full_deck():
@@ -220,253 +276,213 @@ if "deck" not in st.session_state:
     st.session_state["deck"] = get_full_deck()
     st.session_state["deck_index"] = 0
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-TEAM_COLORS = {
-    "team1": "#E85D04",
-    "team2": "#2D6A4F",
-    "team3": "#7B2D8B",
-    "team4": "#1565C0",
-}
-TEAM_LABELS = {"team1": "Team 1", "team2": "Team 2", "team3": "Team 3", "team4": "Team 4"}
+# ─────────────────────────────────────────────────────────────────────────────
+# CONSTANTS
+# ─────────────────────────────────────────────────────────────────────────────
+TEAM_COLORS = {"team1": "#E85D04", "team2": "#2D6A4F", "team3": "#7B2D8B", "team4": "#1565C0"}
+TEAM_LABELS = {"team1": "Team 1",  "team2": "Team 2",  "team3": "Team 3",  "team4": "Team 4"}
+TYPE_LABELS = {"trivia": "Trivia", "association": "Association", "action": "Action", "wildcard": "Wildcard"}
+TYPE_COLORS = {"trivia": "#1565C0","association": "#2D6A4F","action": "#E85D04","wildcard": "#7B2D8B"}
+ALL_TEAMS   = ["team1", "team2", "team3", "team4"]
 
-TYPE_LABELS = {
-    "trivia": "Trivia",
-    "association": "Association",
-    "action": "Action",
-    "wildcard": "Wildcard",
-}
-TYPE_COLORS = {
-    "trivia": "#1565C0",
-    "association": "#2D6A4F",
-    "action": "#E85D04",
-    "wildcard": "#7B2D8B",
-}
-
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
 def draw_card():
     deck = st.session_state["deck"]
-    idx = st.session_state["deck_index"]
+    idx  = st.session_state["deck_index"]
     if idx >= len(deck):
-        st.session_state["deck"] = get_full_deck()
+        st.session_state["deck"]       = get_full_deck()
         st.session_state["deck_index"] = 0
         idx = 0
-    card = deck[idx]
-    st.session_state["deck_index"] = idx + 1
-    st.session_state["current_card"] = card
+    st.session_state["current_card"]  = deck[idx]
+    st.session_state["deck_index"]    = idx + 1
     st.session_state["card_revealed"] = False
-    st.session_state["card_result"] = None
+    st.session_state["card_result"]   = None
 
-def get_penalty_text(penalty):
-    if penalty == "1 sip":
-        return "Take 1 sip"
-    elif penalty == "2 sips":
-        return "Take 2 sips"
-    elif penalty == "3 sips":
-        return "Take 3 sips"
-    elif penalty == "move back 1":
-        return "Move back 1 space"
-    return penalty
+def team_name(tid):
+    return st.session_state["teams"].get(tid, {}).get("name", TEAM_LABELS.get(tid, tid))
 
-def get_reward_text(reward):
-    return f"Move forward {reward} spaces"
+def team_cups(tid):
+    return st.session_state["teams"].get(tid, {}).get("cups", 0)
 
-# ── CSS ───────────────────────────────────────────────────────────────────────
+def ensure_team(tid):
+    if tid not in st.session_state["teams"]:
+        st.session_state["teams"][tid] = {"name": TEAM_LABELS[tid], "cups": 0}
+
+def add_log(player, tname, etype, result, detail):
+    st.session_state["card_log"].append({
+        "player": player, "team": tname, "type": etype,
+        "result": result, "detail": detail,
+        "time": datetime.now().strftime("%H:%M:%S"),
+    })
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CSS
+# ─────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .main { background-color: #0f0f0f; }
-    .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
-    h1, h2, h3 { font-family: sans-serif; }
+  .main { background:#0a0a0a; }
+  .block-container { padding-top:1.2rem; padding-bottom:2rem; }
+  .game-title { font-size:2rem; font-weight:700; text-align:center; color:#FF8C00;
+                letter-spacing:1px; margin-bottom:.15rem; }
+  .game-sub   { text-align:center; color:#888; font-size:.9rem; margin-bottom:1.2rem; }
 
-    .game-title {
-        font-size: 2rem; font-weight: 700; text-align: center;
-        color: #FF8C00; letter-spacing: 1px; margin-bottom: 0.2rem;
-    }
-    .game-sub {
-        text-align: center; color: #aaa; font-size: 0.95rem; margin-bottom: 1.5rem;
-    }
-    .card-box {
-        border-radius: 16px; padding: 2rem 1.5rem; text-align: center;
-        margin: 1rem 0; border: 2px solid;
-    }
-    .card-type-badge {
-        display: inline-block; border-radius: 20px; padding: 4px 16px;
-        font-size: 0.8rem; font-weight: 700; letter-spacing: 1px;
-        margin-bottom: 1rem; text-transform: uppercase;
-    }
-    .card-question {
-        font-size: 1.3rem; font-weight: 600; color: #fff;
-        line-height: 1.5; margin-bottom: 0.5rem;
-    }
-    .card-answer {
-        font-size: 1rem; color: #ccc; margin-top: 0.75rem;
-    }
-    .reward-box {
-        background: #1a3a1a; border: 1px solid #2D6A4F;
-        border-radius: 10px; padding: 0.75rem 1rem; margin-top: 0.75rem;
-        color: #6fcf97; font-size: 1rem; font-weight: 600;
-    }
-    .penalty-box {
-        background: #3a1a1a; border: 1px solid #c0392b;
-        border-radius: 10px; padding: 0.75rem 1rem; margin-top: 0.75rem;
-        color: #e74c3c; font-size: 1rem; font-weight: 600;
-    }
-    .team-cup-card {
-        border-radius: 12px; padding: 1rem; text-align: center; margin-bottom: 0.5rem;
-    }
-    .cup-dots {
-        font-size: 1.5rem; letter-spacing: 4px;
-    }
-    .player-chip {
-        display: inline-block; background: #1e1e1e; border: 1px solid #333;
-        border-radius: 20px; padding: 4px 12px; font-size: 0.8rem;
-        color: #ddd; margin: 2px;
-    }
-    .section-label {
-        font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;
-        color: #888; margin-bottom: 0.4rem;
-    }
-    .win-banner {
-        background: linear-gradient(135deg, #1a3a1a, #0d2b0d);
-        border: 2px solid #27ae60; border-radius: 16px;
-        padding: 1.5rem; text-align: center; margin-bottom: 1rem;
-    }
-    .log-entry {
-        font-size: 0.82rem; color: #aaa; padding: 4px 0;
-        border-bottom: 1px solid #222;
-    }
-    div[data-testid="stButton"] button {
-        border-radius: 10px; font-weight: 600;
-    }
+  .card-box   { border-radius:18px; padding:2rem 1.5rem; text-align:center;
+                margin:1rem 0; border:2px solid; }
+  .card-badge { display:inline-block; border-radius:20px; padding:4px 16px;
+                font-size:.75rem; font-weight:700; letter-spacing:1px;
+                margin-bottom:1rem; text-transform:uppercase; }
+  .card-q     { font-size:1.4rem; font-weight:600; color:#fff; line-height:1.5; }
+  .card-a     { background:#151520; border-radius:10px; padding:.75rem 1rem;
+                margin-top:.75rem; color:#ccc; font-size:.95rem; text-align:left; }
+
+  .reward-box  { background:#0d2b0d; border:1px solid #2D6A4F; border-radius:10px;
+                 padding:.75rem 1rem; margin-top:.75rem; color:#6fcf97;
+                 font-size:1rem; font-weight:600; }
+  .penalty-box { background:#2b0d0d; border:1px solid #c0392b; border-radius:10px;
+                 padding:.75rem 1rem; margin-top:.75rem; color:#e74c3c;
+                 font-size:1rem; font-weight:600; }
+
+  .score-card  { border-radius:14px; padding:1rem; text-align:center; margin-bottom:.4rem; }
+  .cup-row     { font-size:1.4rem; letter-spacing:3px; margin:5px 0; }
+
+  .win-banner  { background:linear-gradient(135deg,#0d2b0d,#082008);
+                 border:2px solid #27ae60; border-radius:16px;
+                 padding:1.5rem; text-align:center; margin-bottom:1rem; }
+  .log-row     { font-size:.8rem; color:#999; padding:4px 0;
+                 border-bottom:1px solid #1a1a1a; }
+  .section-lbl { font-size:.7rem; text-transform:uppercase; letter-spacing:1px;
+                 color:#666; margin-bottom:.3rem; }
+
+  div[data-testid="stButton"] button { border-radius:10px; font-weight:600; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Login Screen ──────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# LOGIN SCREEN
+# ─────────────────────────────────────────────────────────────────────────────
 def login_screen():
     st.markdown('<div class="game-title">True American 🇮🇳</div>', unsafe_allow_html=True)
-    st.markdown('<div class="game-sub">Desi Edition &mdash; UIUC</div>', unsafe_allow_html=True)
+    st.markdown('<div class="game-sub">Desi Edition — UIUC</div>', unsafe_allow_html=True)
 
     with st.form("login_form"):
         email = st.text_input("Illinois email", placeholder="netid@illinois.edu")
-        name = st.text_input("Your name", placeholder="What do people call you?")
-        
-        team_options = {tid: st.session_state["teams"].get(tid, {}).get("name", TEAM_LABELS[tid])
-                        for tid in ["team1","team2","team3","team4"]}
+        name  = st.text_input("Your name",      placeholder="What do people call you?")
         team_choice = st.selectbox(
             "Choose your team",
-            options=list(team_options.keys()),
-            format_func=lambda x: team_options[x]
+            options=ALL_TEAMS,
+            format_func=lambda x: team_name(x),
         )
         submitted = st.form_submit_button("Join the game", use_container_width=True)
 
     if submitted:
         if not email.endswith("@illinois.edu"):
-            st.error("You must use an @illinois.edu email address.")
-            return
+            st.error("Must be an @illinois.edu email."); return
         if not name.strip():
-            st.error("Please enter your name.")
-            return
+            st.error("Enter your name."); return
         if email in st.session_state["players"]:
-            # Re-login
             p = st.session_state["players"][email]
-            st.session_state["logged_in_email"] = email
-            st.session_state["logged_in_name"] = p["name"]
-            st.session_state["logged_in_team"] = p["team"]
+            st.session_state.update(
+                logged_in_email=email, logged_in_name=p["name"], logged_in_team=p["team"])
             st.rerun()
         else:
-            team_count = sum(1 for p in st.session_state["players"].values() if p["team"] == team_choice)
-            if team_count >= 4:
-                st.error("That team is full (max 4 players). Pick another team.")
-                return
+            count = sum(1 for p in st.session_state["players"].values() if p["team"] == team_choice)
+            if count >= 4:
+                st.error("That team is full (max 4). Pick another."); return
+            ensure_team(team_choice)
             st.session_state["players"][email] = {
-                "name": name.strip(),
-                "team": team_choice,
-                "joined_at": datetime.now().strftime("%H:%M:%S")
+                "name": name.strip(), "team": team_choice,
+                "joined_at": datetime.now().strftime("%H:%M:%S"),
             }
-            st.session_state["logged_in_email"] = email
-            st.session_state["logged_in_name"] = name.strip()
-            st.session_state["logged_in_team"] = team_choice
+            st.session_state.update(
+                logged_in_email=email, logged_in_name=name.strip(), logged_in_team=team_choice)
             st.rerun()
 
-    # Team name setup
     st.markdown("---")
     st.markdown("#### Set team names")
     cols = st.columns(4)
-    for i, (tid, col) in enumerate(zip(["team1","team2","team3","team4"], cols)):
+    for i, (tid, col) in enumerate(zip(ALL_TEAMS, cols)):
         with col:
-            current = st.session_state["teams"].get(tid, {}).get("name", f"Team {i+1}")
-            new_name = st.text_input(f"Team {i+1} name", value=current, key=f"tname_{tid}")
-            if new_name != current:
-                if tid not in st.session_state["teams"]:
-                    st.session_state["teams"][tid] = {}
-                st.session_state["teams"][tid]["name"] = new_name
-                if "cups" not in st.session_state["teams"][tid]:
-                    st.session_state["teams"][tid]["cups"] = 0
+            ensure_team(tid)
+            cur = team_name(tid)
+            new = st.text_input(f"Team {i+1}", value=cur, key=f"tname_{tid}")
+            if new != cur:
+                st.session_state["teams"][tid]["name"] = new
 
-    # Show who's already joined
     if st.session_state["players"]:
         st.markdown("---")
-        st.markdown("#### Players who've joined")
-        for tid in ["team1","team2","team3","team4"]:
-            tname = st.session_state["teams"].get(tid, {}).get("name", TEAM_LABELS[tid])
+        st.markdown("#### Who's joined")
+        for tid in ALL_TEAMS:
             members = [p["name"] for p in st.session_state["players"].values() if p["team"] == tid]
             if members:
-                color = TEAM_COLORS[tid]
-                st.markdown(f'<span style="color:{color}; font-weight:700;">{tname}</span>: ' +
-                            " · ".join(members), unsafe_allow_html=True)
+                c = TEAM_COLORS[tid]
+                st.markdown(
+                    f'<span style="color:{c};font-weight:700;">{team_name(tid)}</span>: '
+                    + " · ".join(members), unsafe_allow_html=True)
 
-# ── Main Game Screen ──────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# GAME SCREEN
+# ─────────────────────────────────────────────────────────────────────────────
 def game_screen():
-    email = st.session_state["logged_in_email"]
-    my_name = st.session_state["logged_in_name"]
-    my_team = st.session_state["logged_in_team"]
-    my_team_name = st.session_state["teams"].get(my_team, {}).get("name", TEAM_LABELS[my_team])
+    my_name  = st.session_state["logged_in_name"]
+    my_team  = st.session_state["logged_in_team"]
+    my_tname = team_name(my_team)
     my_color = TEAM_COLORS[my_team]
 
     st.markdown('<div class="game-title">True American 🇮🇳</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="game-sub">Playing as <strong>{my_name}</strong> &mdash; '
-                f'<span style="color:{my_color}">{my_team_name}</span></div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="game-sub">Playing as <strong>{my_name}</strong> — '
+        f'<span style="color:{my_color}">{my_tname}</span></div>',
+        unsafe_allow_html=True)
 
-    # ── Scoreboard ────────────────────────────────────────────────────────────
+    # SCOREBOARD
     st.markdown("### Scoreboard")
-    score_cols = st.columns(4)
     winner = None
-    for i, (tid, col) in enumerate(zip(["team1","team2","team3","team4"], score_cols)):
-        cups = st.session_state["teams"].get(tid, {}).get("cups", 0)
-        tname = st.session_state["teams"].get(tid, {}).get("name", TEAM_LABELS[tid])
-        color = TEAM_COLORS[tid]
+    scols = st.columns(4)
+    for tid, col in zip(ALL_TEAMS, scols):
+        ensure_team(tid)
+        cups    = team_cups(tid)
+        tname   = team_name(tid)
+        color   = TEAM_COLORS[tid]
         members = [p["name"] for p in st.session_state["players"].values() if p["team"] == tid]
-        filled = "🔴" * cups + "⚪" * max(0, 6 - cups)
+        cup_row = "🔴" * cups + "⚪" * max(0, 6 - cups)
         with col:
             st.markdown(
-                f'<div class="team-cup-card" style="background:#1a1a1a; border: 2px solid {color};">'
-                f'<div style="color:{color}; font-weight:700; font-size:1rem;">{tname}</div>'
-                f'<div class="cup-dots" style="margin:6px 0;">{filled}</div>'
-                f'<div style="color:#ccc; font-size:0.8rem;">{cups} / 6 cups</div>'
-                f'<div style="color:#888; font-size:0.72rem; margin-top:4px;">'
-                + (", ".join(members) if members else "No players yet") +
-                f'</div></div>',
-                unsafe_allow_html=True
-            )
+                f'<div class="score-card" style="background:#111;border:2px solid {color};">'
+                f'<div style="color:{color};font-weight:700;font-size:1rem;">{tname}</div>'
+                f'<div class="cup-row">{cup_row}</div>'
+                f'<div style="color:#aaa;font-size:.8rem;">{cups} / 6 cups</div>'
+                f'<div style="color:#555;font-size:.7rem;margin-top:4px;">'
+                f'{", ".join(members) or "—"}</div></div>',
+                unsafe_allow_html=True)
         if cups >= 6:
             winner = tname
 
     if winner:
         st.markdown(
-            f'<div class="win-banner"><div style="font-size:2rem;">🏆</div>'
-            f'<div style="color:#27ae60; font-size:1.5rem; font-weight:700;">{winner} wins!</div>'
-            f'<div style="color:#aaa;">The Scepter of Azadi is forged. Game over!</div></div>',
-            unsafe_allow_html=True
-        )
+            f'<div class="win-banner"><div style="font-size:2.5rem;">🏆</div>'
+            f'<div style="color:#27ae60;font-size:1.6rem;font-weight:700;">{winner} wins!</div>'
+            f'<div style="color:#aaa;margin-top:.4rem;">Game over.</div></div>',
+            unsafe_allow_html=True)
 
     st.markdown("---")
-
-    # ── Two columns: Card + Actions ────────────────────────────────────────────
     left, right = st.columns([3, 2], gap="large")
 
+    # CARD SECTION
     with left:
         st.markdown("### Draw a card")
-        st.caption("Draw a card for the player in front of you. Trivia = open to everyone. Action = they choose a teammate.")
+        st.caption(
+            "**Trivia / Association** — open to everyone, shout your answer first. "
+            "**Action** — player chooses a teammate if they want. "
+            "✅ Pass = move forward the number shown. ❌ Fail = drink only, no movement."
+        )
 
-        if st.button("Draw card", use_container_width=True, type="primary"):
+        total      = len(st.session_state["deck"])
+        remaining  = total - st.session_state["deck_index"]
+        st.caption(f"Deck: {remaining} / {total} cards remaining")
+
+        if st.button("🃏  Draw card", use_container_width=True, type="primary"):
             draw_card()
 
         card = st.session_state.get("current_card")
@@ -476,24 +492,19 @@ def game_screen():
             label = TYPE_LABELS.get(ctype, ctype)
 
             st.markdown(
-                f'<div class="card-box" style="background:#111; border-color:{color};">'
-                f'<div class="card-type-badge" style="background:{color}22; color:{color};">{label}</div>'
-                f'<div class="card-question">{card["q"]}</div>'
-                f'</div>',
-                unsafe_allow_html=True
-            )
+                f'<div class="card-box" style="background:#0f0f0f;border-color:{color};">'
+                f'<div class="card-badge" style="background:{color}22;color:{color};">{label}</div>'
+                f'<div class="card-q">{card["q"]}</div>'
+                f'</div>', unsafe_allow_html=True)
 
             if not st.session_state.get("card_revealed"):
-                if st.button("Reveal answer", use_container_width=True):
+                if st.button("Reveal answer / judging notes", use_container_width=True):
                     st.session_state["card_revealed"] = True
                     st.rerun()
             else:
                 st.markdown(
-                    f'<div style="background:#1a1a2e; border-radius:10px; padding:0.75rem 1rem; '
-                    f'color:#ddd; font-size:0.95rem; margin-bottom:0.75rem;">'
-                    f'<strong>Answer:</strong> {card["a"]}</div>',
-                    unsafe_allow_html=True
-                )
+                    f'<div class="card-a"><strong>Answer / notes:</strong> {card["a"]}</div>',
+                    unsafe_allow_html=True)
 
                 result = st.session_state.get("card_result")
                 if result is None:
@@ -501,129 +512,96 @@ def game_screen():
                     with c1:
                         if st.button("✅  Nailed it", use_container_width=True):
                             st.session_state["card_result"] = "pass"
-                            st.session_state["card_log"].append({
-                                "player": my_name,
-                                "team": my_team_name,
-                                "type": label,
-                                "result": "pass",
-                                "detail": get_reward_text(card["reward"]),
-                                "time": datetime.now().strftime("%H:%M:%S"),
-                            })
+                            add_log(my_name, my_tname, label, "pass",
+                                    f"Move forward {card['reward']} space(s)")
                             st.rerun()
                     with c2:
                         if st.button("❌  Failed", use_container_width=True):
                             st.session_state["card_result"] = "fail"
-                            st.session_state["card_log"].append({
-                                "player": my_name,
-                                "team": my_team_name,
-                                "type": label,
-                                "result": "fail",
-                                "detail": get_penalty_text(card["penalty"]),
-                                "time": datetime.now().strftime("%H:%M:%S"),
-                            })
+                            add_log(my_name, my_tname, label, "fail",
+                                    f"Penalty: {card['penalty']}")
                             st.rerun()
+
                 elif result == "pass":
                     st.markdown(
-                        f'<div class="reward-box">🎉 Reward: {get_reward_text(card["reward"])}</div>',
-                        unsafe_allow_html=True
-                    )
-                elif result == "fail":
-                    st.markdown(
-                        f'<div class="penalty-box">💀 Penalty: {get_penalty_text(card["penalty"])}</div>',
-                        unsafe_allow_html=True
-                    )
+                        f'<div class="reward-box">'
+                        f'🎉 Move forward <strong>{card["reward"]}</strong> space(s)!</div>',
+                        unsafe_allow_html=True)
 
+                elif result == "fail":
+                    p = card["penalty"]
+                    emoji = "💀" if "finish" in p else "🍺"
+                    st.markdown(
+                        f'<div class="penalty-box">'
+                        f'{emoji} Penalty: <strong>{p}</strong> — stay where you are.</div>',
+                        unsafe_allow_html=True)
+
+    # CUP ACTIONS
     with right:
         st.markdown("### Cup actions")
 
-        st.markdown('<div class="section-label">Chug &amp; win a cup</div>', unsafe_allow_html=True)
-        st.caption("When your team's player chugs at the cup spot, add a cup here.")
-        cup_team = st.selectbox(
-            "Which team got a cup?",
-            options=["team1","team2","team3","team4"],
-            format_func=lambda x: st.session_state["teams"].get(x, {}).get("name", TEAM_LABELS[x]),
-            key="cup_team_select"
-        )
-        if st.button("Add cup to team", use_container_width=True):
-            if cup_team not in st.session_state["teams"]:
-                st.session_state["teams"][cup_team] = {"cups": 0}
-            if st.session_state["teams"][cup_team].get("cups", 0) < 6:
-                st.session_state["teams"][cup_team]["cups"] = st.session_state["teams"][cup_team].get("cups", 0) + 1
-                st.session_state["card_log"].append({
-                    "player": my_name,
-                    "team": my_team_name,
-                    "type": "Cup",
-                    "result": "cup added",
-                    "detail": f"Cup added to {st.session_state['teams'][cup_team]['name']}",
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                })
+        st.markdown('<div class="section-lbl">Chug &amp; win a cup 🔴</div>', unsafe_allow_html=True)
+        st.caption("Player reached the cup spot and chugged. Add the cup here.")
+        cup_team = st.selectbox("Team that got the cup", ALL_TEAMS, format_func=team_name, key="cup_sel")
+        if st.button("Add cup", use_container_width=True):
+            ensure_team(cup_team)
+            if team_cups(cup_team) < 6:
+                st.session_state["teams"][cup_team]["cups"] += 1
+                add_log(my_name, my_tname, "Cup", "cup added",
+                        f"+1 cup → {team_name(cup_team)}")
                 st.rerun()
             else:
                 st.warning("That team already has 6 cups!")
 
         st.markdown("---")
-        st.markdown('<div class="section-label">Floor is lava 🌋</div>', unsafe_allow_html=True)
-        st.caption("Someone touched the floor? Remove a cup from their team.")
-        lava_team = st.selectbox(
-            "Which team touched the floor?",
-            options=["team1","team2","team3","team4"],
-            format_func=lambda x: st.session_state["teams"].get(x, {}).get("name", TEAM_LABELS[x]),
-            key="lava_team_select"
-        )
+        st.markdown('<div class="section-lbl">Floor is lava 🌋</div>', unsafe_allow_html=True)
+        st.caption("Someone touched the floor. Remove their team's cup.")
+        lava_team = st.selectbox("Team that touched the floor", ALL_TEAMS, format_func=team_name, key="lava_sel")
         if st.button("Remove cup (lava penalty)", use_container_width=True):
-            if lava_team not in st.session_state["teams"]:
-                st.session_state["teams"][lava_team] = {"cups": 0}
-            current = st.session_state["teams"][lava_team].get("cups", 0)
-            if current > 0:
-                st.session_state["teams"][lava_team]["cups"] = current - 1
-                st.session_state["card_log"].append({
-                    "player": my_name,
-                    "team": my_team_name,
-                    "type": "Lava",
-                    "result": "cup removed",
-                    "detail": f"Lava penalty on {st.session_state['teams'][lava_team]['name']}",
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                })
+            ensure_team(lava_team)
+            if team_cups(lava_team) > 0:
+                st.session_state["teams"][lava_team]["cups"] -= 1
+                add_log(my_name, my_tname, "Lava", "cup removed",
+                        f"–1 cup → {team_name(lava_team)}")
                 st.rerun()
             else:
                 st.warning("That team has no cups to lose!")
 
         st.markdown("---")
-        st.markdown('<div class="section-label">Actions</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-lbl">Admin</div>', unsafe_allow_html=True)
         if st.button("Logout", use_container_width=True):
-            st.session_state["logged_in_email"] = None
-            st.session_state["logged_in_name"] = None
-            st.session_state["logged_in_team"] = None
-            st.rerun()
-        if st.button("Reset entire game", use_container_width=True):
-            for tid in ["team1","team2","team3","team4"]:
-                if tid in st.session_state["teams"]:
-                    st.session_state["teams"][tid]["cups"] = 0
-            st.session_state["players"] = {}
-            st.session_state["card_log"] = []
-            st.session_state["current_card"] = None
-            st.session_state["card_result"] = None
-            st.session_state["card_revealed"] = False
-            st.session_state["logged_in_email"] = None
-            st.session_state["logged_in_name"] = None
-            st.session_state["logged_in_team"] = None
-            st.session_state["deck"] = get_full_deck()
-            st.session_state["deck_index"] = 0
+            st.session_state.update(
+                logged_in_email=None, logged_in_name=None, logged_in_team=None)
             st.rerun()
 
-    # ── Activity log ──────────────────────────────────────────────────────────
+        if st.button("🔄  Reset entire game", use_container_width=True):
+            for tid in ALL_TEAMS:
+                ensure_team(tid)
+                st.session_state["teams"][tid]["cups"] = 0
+            st.session_state.update(
+                players={}, card_log=[], current_card=None,
+                card_result=None, card_revealed=False,
+                logged_in_email=None, logged_in_name=None, logged_in_team=None,
+                deck=get_full_deck(), deck_index=0,
+            )
+            st.rerun()
+
+    # ACTIVITY LOG
     if st.session_state["card_log"]:
         st.markdown("---")
         st.markdown("### Activity log")
-        for entry in reversed(st.session_state["card_log"][-20:]):
-            icon = "✅" if entry["result"] == "pass" else ("🔴" if entry["result"] == "cup added" else ("🌋" if entry["result"] == "cup removed" else "❌"))
+        icons = {"pass": "✅", "fail": "❌", "cup added": "🔴", "cup removed": "🌋"}
+        for entry in reversed(st.session_state["card_log"][-25:]):
+            icon = icons.get(entry["result"], "•")
             st.markdown(
-                f'<div class="log-entry">{icon} <strong>{entry["player"]}</strong> ({entry["team"]}) &mdash; '
-                f'[{entry["type"]}] {entry["detail"]} <span style="color:#555;">{entry["time"]}</span></div>',
-                unsafe_allow_html=True
-            )
+                f'<div class="log-row">{icon} <strong>{entry["player"]}</strong> ({entry["team"]}) '
+                f'[{entry["type"]}] — {entry["detail"]} '
+                f'<span style="color:#444;">{entry["time"]}</span></div>',
+                unsafe_allow_html=True)
 
-# ── Router ────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# ROUTER
+# ─────────────────────────────────────────────────────────────────────────────
 if st.session_state["logged_in_email"]:
     game_screen()
 else:
